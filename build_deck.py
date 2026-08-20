@@ -2,8 +2,24 @@
 # "Matching Marcas x Roster" — full deck, one section per brand, generated
 # straight from the client's Excel (no hand-typed brand data, to avoid
 # transcription errors across 21 brands).
-import json, os, re
+import json, math, os, re, sys
 import openpyxl
+
+def brand_slug(marca):
+    return re.sub(r'[^a-z0-9]+', '-', marca.lower())
+
+# PDF export: each brand gets its own named @page sized to fit its own
+# secondary-grid row count, so a brand with many matches (e.g. Samsung, 11)
+# doesn't spill onto a mostly-blank continuation page.
+PDF_PAGE_W = 1600
+PDF_PAGE_BASE_H = 1140
+PDF_PAGE_ROW_H = 256
+PDF_GRID_COLS = 8
+
+def brand_page_height(n_secondary):
+    rows = math.ceil(n_secondary / PDF_GRID_COLS) if n_secondary else 1
+    extra_rows = max(0, rows - 1)
+    return PDF_PAGE_BASE_H + extra_rows * PDF_PAGE_ROW_H
 
 HERE = os.path.dirname(__file__)
 XLSX_PATH = os.path.join(HERE, "Matching marcas x roster.xlsx")
@@ -29,6 +45,13 @@ IG_ICON = '''<svg width="15" height="15" viewBox="4.5 4.5 11 11" fill="none" xml
 <path fill-rule="evenodd" clip-rule="evenodd" d="M10 13C11.6568 13 13 11.6568 13 10C13 8.34315 11.6568 7 10 7C8.34315 7 7 8.34315 7 10C7 11.6568 8.34315 13 10 13ZM10 12C11.1046 12 12 11.1046 12 10C12 8.89543 11.1046 8 10 8C8.89543 8 8 8.89543 8 10C8 11.1046 8.89543 12 10 12Z" fill="currentColor"/>
 <path d="M13 6.5C12.7239 6.5 12.5 6.72386 12.5 7C12.5 7.27614 12.7239 7.5 13 7.5C13.2762 7.5 13.5 7.27614 13.5 7C13.5 6.72386 13.2762 6.5 13 6.5Z" fill="currentColor"/>
 <path fill-rule="evenodd" clip-rule="evenodd" d="M4.82698 6.13803C4.5 6.77977 4.5 7.61985 4.5 9.3V10.7C4.5 12.3801 4.5 13.2202 4.82698 13.8619C5.1146 14.4264 5.57354 14.8854 6.13803 15.173C6.77977 15.5 7.61985 15.5 9.3 15.5H10.7C12.3801 15.5 13.2202 15.5 13.8619 15.173C14.4264 14.8854 14.8854 14.4264 15.173 13.8619C15.5 13.2202 15.5 12.3801 15.5 10.7V9.3C15.5 7.61985 15.5 6.77977 15.173 6.13803C14.8854 5.57354 14.4264 5.1146 13.8619 4.82698C13.2202 4.5 12.3801 4.5 10.7 4.5H9.3C7.61985 4.5 6.77977 4.5 6.13803 4.82698C5.57354 5.1146 5.1146 5.57354 4.82698 6.13803ZM10.7 5.5H9.3C8.44342 5.5 7.86113 5.50078 7.41104 5.53755C6.97262 5.57337 6.74842 5.6383 6.59202 5.71799C6.2157 5.90974 5.90974 6.2157 5.71799 6.59202C5.6383 6.74842 5.57337 6.97262 5.53755 7.41104C5.50078 7.86113 5.5 8.44342 5.5 9.3V10.7C5.5 11.5566 5.50078 12.1388 5.53755 12.5889C5.57337 13.0274 5.6383 13.2516 5.71799 13.408C5.90974 13.7843 6.2157 14.0902 6.59202 14.282C6.74842 14.3617 6.97262 14.4267 7.41104 14.4625C7.86113 14.4992 8.44342 14.5 9.3 14.5H10.7C11.5566 14.5 12.1388 14.4992 12.5889 14.4625C13.0274 14.4267 13.2516 14.3617 13.408 14.282C13.7843 14.0902 14.0902 13.7843 14.282 13.408C14.3617 13.2516 14.4267 13.0274 14.4625 12.5889C14.4992 12.1388 14.5 11.5566 14.5 10.7V9.3C14.5 8.44342 14.4992 7.86113 14.4625 7.41104C14.4267 6.97262 14.3617 6.74842 14.282 6.59202C14.0902 6.2157 13.7843 5.90974 13.408 5.71799C13.2516 5.6383 13.0274 5.57337 12.5889 5.53755C12.1388 5.50078 11.5566 5.5 10.7 5.5Z" fill="currentColor"/>
+</svg>'''
+
+TT_ICON = '''<svg width="15" height="15" viewBox="4.5 4.5 11 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.9314 6.22392C12.5107 5.76167 12.2578 5.15893 12.2578 4.5H11.7306C11.8664 5.22023 12.3137 5.83829 12.9314 6.22392Z" fill="currentColor"/>
+<path d="M8.05382 9.94764C7.14061 9.94764 6.3978 10.6602 6.3978 11.5362C6.3978 12.1467 6.75989 12.6778 7.28704 12.9434C7.09003 12.683 6.97288 12.3637 6.97288 12.0164C6.97288 11.1404 7.71569 10.4278 8.62891 10.4278C8.7993 10.4278 8.96435 10.4558 9.11879 10.5018V8.57106C8.95902 8.5506 8.79663 8.53782 8.62891 8.53782C8.59961 8.53782 8.57299 8.54038 8.5437 8.54038V10.0217C8.38662 9.97569 8.22421 9.94764 8.05382 9.94764Z" fill="currentColor"/>
+<path d="M14.4249 7.07184V8.54038C13.4026 8.54038 12.4548 8.22626 11.6826 7.69501V11.5387C11.6826 13.4568 10.0559 15.0199 8.05377 15.0199C7.28168 15.0199 6.56283 14.7849 5.97444 14.389C6.63737 15.0709 7.58253 15.5 8.62887 15.5C10.6283 15.5 12.2577 13.9395 12.2577 12.0189V8.17516C13.0298 8.70641 13.9776 9.02051 15 9.02051V7.13061C14.8003 7.13061 14.6086 7.11016 14.4249 7.07184Z" fill="currentColor"/>
+<path d="M11.6826 11.5387V7.69501C12.4548 8.22626 13.4026 8.54038 14.4249 8.54038V7.07184C13.8339 6.95183 13.3148 6.64535 12.9314 6.22392C12.3137 5.83829 11.869 5.22023 11.7279 4.5H10.2849L10.2822 12.0776C10.2503 12.9256 9.52076 13.6075 8.62887 13.6075C8.07507 13.6075 7.58785 13.3444 7.28434 12.946C6.75718 12.6778 6.3951 12.1492 6.3951 11.5387C6.3951 10.6628 7.13791 9.95017 8.05111 9.95017C8.2215 9.95017 8.38657 9.97828 8.541 10.0243V8.54293C6.58147 8.5838 5 10.1264 5 12.0189C5 12.9332 5.37008 13.7658 5.97444 14.389C6.56283 14.7849 7.28168 15.0199 8.05377 15.0199C10.0532 15.0199 11.6826 13.4568 11.6826 11.5387Z" fill="currentColor"/>
 </svg>'''
 
 def isotipo_svg(size=24, color="#FFFFFF"):
@@ -87,15 +110,23 @@ for row in ws2.iter_rows(min_row=2, values_only=True):
 
 def secondary_card(pid):
     p = people[pid]
-    href = p["ig_url"] or "#"
+    ig_href = p["ig_url"] or "#"
+    tt_href = p.get("tt_url") or "#"
+    tt_chip = (
+        f'<a class="mcard-sec-chip" href="{tt_href}" target="_blank" rel="noopener">{TT_ICON}<span>{p["tt"]}</span></a>'
+        if p.get("tt") else ""
+    )
     return f'''
-    <a class="mcard-sec" href="{href}" target="_blank" rel="noopener">
+    <div class="mcard-sec">
       <img class="mcard-sec-photo" src="{p["photo"]}" alt="{p["name"]}" loading="lazy" decoding="async" width="200" height="240">
       <div class="mcard-sec-body">
         <h4 class="mcard-sec-name">{p["name"]}</h4>
-        <span class="mcard-sec-stat">{IG_ICON}{p["ig"] or "—"}</span>
+        <div class="mcard-sec-chips">
+          <a class="mcard-sec-chip" href="{ig_href}" target="_blank" rel="noopener">{IG_ICON}<span>{p["ig"] or "—"}</span></a>
+          {tt_chip}
+        </div>
       </div>
-    </a>'''
+    </div>'''
 
 def brand_section(brand):
     hero_name = brand["names"][0]
@@ -109,8 +140,14 @@ def brand_section(brand):
     secondary_html = "".join(secondary_card(pid) for pid in secondary_pids)
 
     hero_href = hero["ig_url"] or "#"
+    hero_tt_href = hero.get("tt_url") or "#"
+    hero_tt_chip = (
+        f'<a class="hero-photo-chip" href="{hero_tt_href}" target="_blank" rel="noopener">{TT_ICON}<span>{hero["tt"]}</span></a>'
+        if hero.get("tt") else ""
+    )
+    slug = brand_slug(brand["marca"])
     return f'''
-<section class="brand-section" id="brand-{re.sub(r'[^a-z0-9]+', '-', brand["marca"].lower())}">
+<section class="brand-section" id="brand-{slug}" style="page: page-{slug};">
   <div class="brand-badge-row">
     {isotipo_svg(18, "#FFFFFF")}
     <span class="brand-badge-x">×</span>
@@ -125,16 +162,19 @@ def brand_section(brand):
   </div>
 
   <div class="hero-row">
-    <a class="hero-photo-card" href="{hero_href}" target="_blank" rel="noopener">
+    <div class="hero-photo-card">
       <img src="{hero["photo"]}" alt="{hero["name"]}" loading="lazy" decoding="async">
       <div class="hero-photo-scrim" aria-hidden="true"></div>
       <div class="hero-photo-top-scrim" aria-hidden="true"></div>
       <span class="hero-photo-match">★ Match principal</span>
       <div class="hero-photo-tag">
         <div class="hero-photo-name">{hero["name"]}</div>
-        <span class="hero-photo-stat">{IG_ICON}{hero["ig"] or "—"} seguidores</span>
+        <div class="hero-photo-chips">
+          <a class="hero-photo-chip" href="{hero_href}" target="_blank" rel="noopener">{IG_ICON}<span>{hero["ig"] or "—"}</span></a>
+          {hero_tt_chip}
+        </div>
       </div>
-    </a>
+    </div>
     <div class="hero-text-card">
       <div class="hero-text-bg" aria-hidden="true">{fondo_svg()}</div>
       <div class="hero-text-eyebrow">Por qué la recomendamos</div>
@@ -158,11 +198,34 @@ font_faces = "\n".join(f'''
 }}''' for name, w in [("Regular", 400), ("Medium", 500), ("Bold", 700), ("Black", 900)])
 
 nav_links = "\n".join(
-    f'<a href="#brand-{re.sub(r"[^a-z0-9]+", "-", b["marca"].lower())}" class="nav-link">{b["marca"]}</a>'
+    f'<a href="#brand-{brand_slug(b["marca"])}" class="nav-link">{b["marca"]}</a>'
     for b in BRANDS
 )
 
+index_items = "\n".join(f'''
+    <a class="index-item" href="#brand-{brand_slug(b["marca"])}">
+      <span class="index-item-num">{i+1:02d}</span>
+      <span class="index-item-body">
+        <span class="index-item-name">{b["marca"]}</span>
+        <span class="index-item-cat">{b["categoria"]}</span>
+      </span>
+    </a>''' for i, b in enumerate(BRANDS))
+
+index_section = f'''
+<section class="index-section">
+  <div class="index-eyebrow">Índice</div>
+  <h1 class="index-title">Marcas</h1>
+  <div class="index-grid">{index_items}</div>
+</section>'''
+
 sections_html = "\n".join(brand_section(b) for b in BRANDS)
+
+# PDF export: named @page rule per brand, sized to that brand's own
+# secondary-grid row count (see brand_page_height above).
+brand_page_rules = "\n".join(
+    f'@page page-{brand_slug(b["marca"])} {{ size: {PDF_PAGE_W}px {brand_page_height(len(b["names"]) - 1)}px; margin: 0; }}'
+    for b in BRANDS
+)
 
 html = f'''<title>Matching Marcas x Roster — BIG Agency</title>
 <style>
@@ -250,12 +313,16 @@ body {{
   font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
 }}
 .hero-photo-name {{ font-weight: 700; font-size: 26px; letter-spacing: -0.03em; }}
-.hero-photo-stat {{
-  display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
+.hero-photo-chips {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }}
+.hero-photo-chip {{
+  display: inline-flex; align-items: center; gap: 6px;
   padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,.22);
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  color: var(--blanco); text-decoration: none;
   font-weight: 700; font-size: 13px;
+  transition: background .2s ease, transform .2s ease;
 }}
+.hero-photo-chip:hover {{ background: var(--naranja); transform: translateY(-2px); }}
 
 .hero-text-card {{
   flex: 1; min-width: 320px; background: var(--azul); border-radius: 32px; padding: 44px;
@@ -272,7 +339,6 @@ body {{
 .secondary-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }}
 .mcard-sec {{
   display: block; position: relative; border-radius: 22px; overflow: hidden; background: #d9d9d9; height: 240px;
-  text-decoration: none;
   transition: transform .35s cubic-bezier(.16,1,.3,1), box-shadow .35s cubic-bezier(.16,1,.3,1);
 }}
 .mcard-sec:hover {{ transform: translateY(-4px); box-shadow: 0 16px 30px rgba(13,13,23,.25); }}
@@ -287,8 +353,16 @@ body {{
   display: flex; flex-direction: column; gap: 6px;
 }}
 .mcard-sec-name {{ color: var(--blanco); font-weight: 700; font-size: 14px; letter-spacing: -0.02em; }}
-.mcard-sec-stat {{ display: inline-flex; align-items: center; gap: 4px; color: var(--blanco); opacity: .9; font-size: 11.5px; font-weight: 600; width: fit-content; }}
-.mcard-sec-stat svg {{ display: block; }}
+.mcard-sec-chips {{ display: flex; flex-wrap: wrap; gap: 5px; }}
+.mcard-sec-chip {{
+  display: inline-flex; align-items: center; gap: 3px; text-decoration: none;
+  padding: 4px 7px; border-radius: 999px; background: rgba(255,255,255,.22);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  color: var(--blanco); font-size: 10.5px; font-weight: 700;
+  transition: background .2s ease, transform .2s ease;
+}}
+.mcard-sec-chip:hover {{ background: var(--naranja); transform: translateY(-2px); }}
+.mcard-sec-chip svg {{ display: block; width: 11px; height: 11px; }}
 
 .cover-section {{
   min-height: 100vh; position: relative; overflow: hidden; background: var(--azul);
@@ -301,10 +375,49 @@ body {{
   position: relative; z-index: 1; width: min(760px, 78vw); height: auto; display: block;
 }}
 
+/* ---------- índice (PDF export only) ---------- */
+.index-section {{
+  min-height: 100vh; padding: 72px 96px; position: relative;
+  background: var(--fondo);
+  display: flex; flex-direction: column; justify-content: center; gap: 40px;
+}}
+.index-eyebrow {{ color: var(--naranja); font-weight: 700; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }}
+.index-title {{
+  color: var(--azul); font-weight: 900; text-transform: uppercase;
+  font-size: clamp(40px, 5vw, 72px); line-height: .88; letter-spacing: -0.05em; margin-top: -24px;
+}}
+.index-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }}
+.index-item {{
+  display: flex; align-items: baseline; gap: 14px; text-decoration: none; color: var(--azul);
+  background: var(--blanco); border-radius: 14px; padding: 16px 18px;
+  border: 1.5px solid rgba(51,65,154,.12);
+  transition: transform .2s ease, border-color .2s ease;
+}}
+.index-item:hover {{ transform: translateY(-3px); border-color: var(--naranja); }}
+.index-item-num {{ font-weight: 700; font-size: 13px; color: var(--naranja); flex-shrink: 0; }}
+.index-item-body {{ display: flex; flex-direction: column; gap: 3px; }}
+.index-item-name {{ font-weight: 800; font-size: 16.5px; letter-spacing: -0.02em; }}
+.index-item-cat {{ font-weight: 600; font-size: 11px; color: rgba(51,65,154,.6); text-transform: uppercase; letter-spacing: .03em; }}
+
+@page {{
+  size: {PDF_PAGE_W}px {PDF_PAGE_BASE_H}px;
+  margin: 0;
+}}
+{brand_page_rules}
+
 @media print {{
+  * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }}
   .deck-nav {{ display: none; }}
   .cover-section {{ min-height: 100vh; page-break-after: always; }}
-  .brand-section {{ min-height: 100vh; page-break-after: always; }}
+  .index-section {{ min-height: 100vh; page-break-after: always; }}
+  .brand-section {{
+    min-height: 100vh; padding: 48px 64px 40px; page-break-after: always;
+  }}
+  .brand-badge-row {{ margin-bottom: 22px; }}
+  .brand-header {{ margin-bottom: 28px; }}
+  .secondary-head {{ margin: 36px 0 20px; }}
+  .hero-photo-card:hover, .mcard-sec:hover, .index-item:hover,
+  .hero-photo-chip:hover, .mcard-sec-chip:hover {{ transform: none; }}
 }}
 </style>
 
@@ -313,11 +426,21 @@ body {{
   <img class="cover-lockup" src="assets/decktitle.svg" alt="BIG × Media Lab — Matching de marcas con creadores">
 </section>
 
-<nav class="deck-nav">{nav_links}</nav>
+{{nav_or_index}}
 {sections_html}
 '''
 
-out_path = os.path.join(HERE, "index.html")
-with open(out_path, "w") as f:
-    f.write(html)
-print("wrote", out_path, len(html) / 1024, "KB —", len(BRANDS), "brands")
+for_pdf = "--pdf" in sys.argv
+
+if not for_pdf:
+    out_html = html.replace("{nav_or_index}", f'<nav class="deck-nav">{nav_links}</nav>')
+    out_path = os.path.join(HERE, "index.html")
+    with open(out_path, "w") as f:
+        f.write(out_html)
+    print("wrote", out_path, len(out_html) / 1024, "KB —", len(BRANDS), "brands")
+else:
+    out_html = html.replace("{nav_or_index}", index_section)
+    out_path = os.path.join(HERE, "_print_source.html")
+    with open(out_path, "w") as f:
+        f.write(out_html)
+    print("wrote", out_path, len(out_html) / 1024, "KB —", len(BRANDS), "brands (PDF source)")
